@@ -25,13 +25,13 @@ export default function App() {
   const [selectedRole, setSelectedRole] = useState('Tesorero');
   const [pinInput, setPinInput] = useState('');
   const [pins, setPins] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_pins_v11');
+    const saved = localStorage.getItem('balanza_ipap_pins_v12');
     return saved ? JSON.parse(saved) : { Admin: '1234', Tesorero: '2222', Visitante: '0000' };
   });
   const [pinError, setPinError] = useState('');
 
   const [initialYearBalances, setInitialYearBalances] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_initial_balances_v11');
+    const saved = localStorage.getItem('balanza_ipap_initial_balances_v12');
     return saved ? JSON.parse(saved) : { 
       diezmos: { '2025': 287220, '2026': 287220, '2027': 287220, '2028': 287220 }, 
       ofrendas: { '2025': 136504, '2026': 136504, '2027': 136504, '2028': 136504 } 
@@ -44,11 +44,11 @@ export default function App() {
   const [activeModule, setActiveModule] = useState('diezmos');
   const [activeTab, setActiveTab] = useState('balanza');
   const [selectedMonthIdx, setSelectedMonthIdx] = useState(8); // Septiembre por defecto
-  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v11') || '2026');
+  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v12') || '2026');
 
   const [budgetData, setBudgetData] = useState([]);
   const [auditLogs, setAuditLogs] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_audit_logs_v11');
+    const saved = localStorage.getItem('balanza_ipap_audit_logs_v12');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -97,10 +97,10 @@ export default function App() {
     setEntryDate(`${fiscalYear}-${m}-01`);
   }, [fiscalYear, selectedMonthIdx]);
 
-  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v11', JSON.stringify(auditLogs)); }, [auditLogs]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v11', fiscalYear); }, [fiscalYear]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v11', JSON.stringify(pins)); }, [pins]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_initial_balances_v11', JSON.stringify(initialYearBalances)); }, [initialYearBalances]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v12', JSON.stringify(auditLogs)); }, [auditLogs]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v12', fiscalYear); }, [fiscalYear]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v12', JSON.stringify(pins)); }, [pins]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_initial_balances_v12', JSON.stringify(initialYearBalances)); }, [initialYearBalances]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -242,18 +242,16 @@ export default function App() {
     setTimeout(() => setSecMsg(''), 4000);
   };
 
-  // Generador dinámico y avanzado de Excel (CSV) con ingresos mensuales arriba y conceptos agrupados por mes
+  // Generador robusto con Blob nativo para asegurar la descarga correcta en Excel
   const handleDownloadAdvancedExcel = () => {
-    let csvContent = "\uFEFF"; // BOM para correcta codificación UTF-8 en Excel
+    let csvContent = "\uFEFF"; // BOM para UTF-8
     csvContent += `MATRIZ CONCENTRADA ANUAL IPAP - AÑO ${fiscalYear}\n\n`;
 
-    // Cabecera de meses
     let headerRow = "CLASIFICACION,CONCEPTO";
     MONTHS.forEach(m => headerRow += `,${m}`);
     headerRow += ",TOTAL ANUAL\n";
     csvContent += headerRow;
 
-    // 1. Ingresos Totales por Mes (Diezmos y Ofrendas)
     const getMonthlyIncomeByMod = (modName) => {
       return MONTHS.map((_, idx) => {
         const mStr = String(idx + 1).padStart(2, '0');
@@ -280,7 +278,6 @@ export default function App() {
     appendRowData("INGRESOS", "TOTAL INGRESOS OFRENDAS", ofrendasIngs);
     csvContent += "\n";
 
-    // 2. Gastos de Operación y Ministerios agrupados por concepto y mes
     const getExpenseByConceptAndMonth = (conceptTarget) => {
       return MONTHS.map((_, idx) => {
         const mStr = String(idx + 1).padStart(2, '0');
@@ -301,17 +298,20 @@ export default function App() {
       appendRowData("GASTOS DE MINISTERIOS", concept, vals);
     });
 
-    const encodedUri = encodeURI(csvContent);
+    // Descarga segura mediante Blob
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `Concentrado_Anual_IPAP_${fiscalYear}.csv`);
     document.body.appendChild(link);
     link.click();
-    link.remove();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
     showToast("📥 ¡Matriz concentrada en Excel descargada con éxito!");
   };
 
-  // Cálculo encadenado mes a mes
   const calculateMonthTotalsForModule = (modName, targetMonthIdx) => {
     const baseInit = initialYearBalances[modName]?.[fiscalYear] !== undefined 
       ? initialYearBalances[modName][fiscalYear] 
@@ -460,7 +460,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-y-auto">
+    <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100 font-sans">
       {toastMsg && (
         <div className="no-print fixed top-5 right-5 z-50 bg-emerald-600 text-white font-bold text-xs px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
           <span>{toastMsg}</span>
@@ -513,7 +513,7 @@ export default function App() {
           )}
         </div>
 
-        {/* VISTA: BALANZA CON ORDEN EXACTO DEL FORMATO FÍSICO */}
+        {/* VISTA: BALANZA CON MULTIPÁGINA NATURAL */}
         {activeTab === 'balanza' && role !== 'Visitante' && (
           <div className="printable-balanza bg-white text-slate-900 rounded-3xl p-8 shadow-xl space-y-8">
             <div>
@@ -576,7 +576,6 @@ export default function App() {
                   <td className="no-print"></td>
                 </tr>
 
-                {/* FILAS FINALES EXACTAS COMO EL FORMATO FÍSICO */}
                 <tr className="bg-slate-100 font-extrabold border-t-2 border-slate-900">
                   <td colSpan="2" className="p-3 text-right border-r border-slate-300 uppercase">SUMAS DEL MES</td>
                   <td className="p-3 text-right text-emerald-800 border-r border-slate-300">${monthTotals.totalIngresos.toLocaleString('es-MX')}.00</td>
@@ -697,7 +696,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VISTA: SEGURIDAD (CON MATRIZ EXCEL CONCENTRADA Y RESUMIDA AUTOMÁTICAMENTE) */}
+        {/* VISTA: SEGURIDAD */}
         {activeTab === 'seguridad' && role === 'Admin' && (
           <div className="space-y-6 max-w-4xl mx-auto">
             <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-6">
@@ -716,7 +715,7 @@ export default function App() {
                 </div>
                 <button
                   onClick={handleDownloadAdvancedExcel}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition shadow"
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition shadow cursor-pointer"
                 >
                   Descargar Concentrado Excel
                 </button>
@@ -814,17 +813,17 @@ export default function App() {
         </div>
       )}
 
-      {/* ESTILOS CSS EXCLUSIVOS PARA IMPRESIÓN LIMPIA, PAGINACIÓN NATURAL Y FIRMAS */}
+      {/* ESTILOS CSS REVISADOS PARA PERMITIR PAGINACIÓN NATURAL EN MÚLTIPLES HOJAS CARTA Y FIRMAS */}
       <style>{`
         @media print {
-          body { background: #ffffff !important; color: #000000 !important; }
+          html, body { height: auto !important; background: #ffffff !important; color: #000000 !important; }
           .no-print { display: none !important; }
           header, footer, nav { display: none !important; }
-          .printable-balanza { background: #ffffff !important; color: #000000 !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
+          .printable-balanza { background: #ffffff !important; color: #000000 !important; border: none !important; padding: 0 !important; box-shadow: none !important; width: 100% !important; height: auto !important; overflow: visible !important; }
           table { border-color: #000000 !important; background: #ffffff !important; width: 100% !important; page-break-inside: auto; }
           tr { page-break-inside: avoid; page-break-after: auto; }
           th, td { border-color: #333333 !important; color: #000000 !important; }
-          .signature-section { display: grid !important; margin-top: 80px !important; page-break-inside: avoid; page-break-before: auto; }
+          .signature-section { display: grid !important; margin-top: 60px !important; page-break-inside: avoid; page-break-before: auto; }
         }
       `}</style>
     </div>
