@@ -25,14 +25,13 @@ export default function App() {
   const [selectedRole, setSelectedRole] = useState('Tesorero');
   const [pinInput, setPinInput] = useState('');
   const [pins, setPins] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_pins_v9');
+    const saved = localStorage.getItem('balanza_ipap_pins_v10');
     return saved ? JSON.parse(saved) : { Admin: '1234', Tesorero: '2222', Visitante: '0000' };
   });
   const [pinError, setPinError] = useState('');
 
-  // Saldos iniciales de apertura de año configurables por el Admin
   const [initialYearBalances, setInitialYearBalances] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_initial_balances_v9');
+    const saved = localStorage.getItem('balanza_ipap_initial_balances_v10');
     return saved ? JSON.parse(saved) : { 
       diezmos: { '2025': 287220, '2026': 287220, '2027': 287220, '2028': 287220 }, 
       ofrendas: { '2025': 136504, '2026': 136504, '2027': 136504, '2028': 136504 } 
@@ -44,12 +43,12 @@ export default function App() {
   
   const [activeModule, setActiveModule] = useState('diezmos');
   const [activeTab, setActiveTab] = useState('balanza');
-  const [selectedMonthIdx, setSelectedMonthIdx] = useState(11); // Diciembre por defecto
-  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v9') || '2025');
+  const [selectedMonthIdx, setSelectedMonthIdx] = useState(8); // Septiembre por defecto
+  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v10') || '2026');
 
   const [budgetData, setBudgetData] = useState([]);
   const [auditLogs, setAuditLogs] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_audit_logs_v9');
+    const saved = localStorage.getItem('balanza_ipap_audit_logs_v10');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -98,10 +97,10 @@ export default function App() {
     setEntryDate(`${fiscalYear}-${m}-01`);
   }, [fiscalYear, selectedMonthIdx]);
 
-  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v9', JSON.stringify(auditLogs)); }, [auditLogs]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v9', fiscalYear); }, [fiscalYear]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v9', JSON.stringify(pins)); }, [pins]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_initial_balances_v9', JSON.stringify(initialYearBalances)); }, [initialYearBalances]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v10', JSON.stringify(auditLogs)); }, [auditLogs]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v10', fiscalYear); }, [fiscalYear]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v10', JSON.stringify(pins)); }, [pins]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_initial_balances_v10', JSON.stringify(initialYearBalances)); }, [initialYearBalances]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -243,59 +242,77 @@ export default function App() {
     setTimeout(() => setSecMsg(''), 4000);
   };
 
-  // Cálculo encadenado mes a mes del saldo inicial y final
+  // Función para descargar la plantilla Excel de conceptos contables
+  const handleDownloadConceptsExcel = () => {
+    let csvContent = "data:text/csv;charset=utf-8,CLASIFICACION,CONCEPTO\n";
+    INITIAL_EXPENSE_CONCEPTS.GASTOS_OPERACION.forEach(item => {
+      csvContent += `GASTOS DE OPERACION,"${item}"\n`;
+    });
+    INITIAL_EXPENSE_CONCEPTS.GASTOS_MINISTERIOS.forEach(item => {
+      csvContent += `GASTOS DE MINISTERIOS,"${item}"\n`;
+    });
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Plantilla_Conceptos_Gastos_IPAP_${fiscalYear}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    showToast("📥 ¡Plantilla de conceptos descargada con éxito!");
+  };
+
+  // Cálculo encadenado mes a mes con la corrección exacta de sumas iguales
   const calculateMonthTotalsForModule = (modName, targetMonthIdx) => {
     const baseInit = initialYearBalances[modName]?.[fiscalYear] !== undefined 
       ? initialYearBalances[modName][fiscalYear] 
       : (modName === 'diezmos' ? 287220 : 136504);
 
-    let runningSaldo = baseInit;
-
-    for (let m = 0; m <= targetMonthIdx; m++) {
-      const monthStr = String(m + 1).padStart(2, '0');
-      const monthRecs = budgetData.filter(i => i.module === modName && i.year === fiscalYear && i.date.split('-')[1] === monthStr);
-
-      let mIng = 0;
-      let mEgr = 0;
-      monthRecs.forEach(r => {
-        if (r.type === 'Ingreso') mIng += Number(r.amount);
-        if (r.type === 'Egreso') mEgr += Number(r.amount);
-      });
-
-      const presb = Math.round(mIng * 0.10);
-      const totalSalidasMes = mEgr + presb;
-
-      if (m < targetMonthIdx) {
-        runningSaldo = runningSaldo + mIng - totalSalidasMes;
-      } else {
-        const prevSaldo = m === 0 ? baseInit : (() => {
-          let prevR = baseInit;
-          for (let pm = 0; pm < m; pm++) {
-            const pStr = String(pm + 1).padStart(2, '0');
-            const pRecs = budgetData.filter(i => i.module === modName && i.year === fiscalYear && i.date.split('-')[1] === pStr);
-            let pIng = 0, pEgr = 0;
-            pRecs.forEach(pr => {
-              if (pr.type === 'Ingreso') pIng += Number(pr.amount);
-              if (pr.type === 'Egreso') pEgr += Number(pr.amount);
-            });
-            prevR = prevR + pIng - (pEgr + Math.round(pIng * 0.10));
-          }
-          return prevR;
-        })();
-
-        return {
-          initialSaldo: prevSaldo,
-          totalIngresos: mIng,
-          totalEgresos: mEgr,
-          presbiterio10: presb,
-          totalEgresosConPresbiterio: totalSalidasMes,
-          saldoSiguienteMes: prevSaldo + mIng - totalSalidasMes,
-          sumasIguales: mIng + prevSaldo
-        };
+    const getPrevSaldoForMonth = (mIdx) => {
+      let runningR = baseInit;
+      for (let m = 0; m < mIdx; m++) {
+        const mStr = String(m + 1).padStart(2, '0');
+        const mRecs = budgetData.filter(i => i.module === modName && i.year === fiscalYear && i.date.split('-')[1] === mStr);
+        let mIng = 0, mEgr = 0;
+        mRecs.forEach(r => {
+          if (r.type === 'Ingreso') mIng += Number(r.amount);
+          if (r.type === 'Egreso') mEgr += Number(r.amount);
+        });
+        const mPresb = Math.round(mIng * 0.10);
+        runningR = runningR + mIng - (mEgr + mPresb);
       }
-    }
+      return runningR;
+    };
 
-    return { initialSaldo: baseInit, totalIngresos: 0, totalEgresos: 0, presbiterio10: 0, totalEgresosConPresbiterio: 0, saldoSiguienteMes: baseInit, sumasIguales: baseInit };
+    const initialSaldo = getPrevSaldoForMonth(targetMonthIdx);
+
+    const monthNumStr = String(targetMonthIdx + 1).padStart(2, '0');
+    const currentMonthRecs = budgetData.filter(i => i.module === modName && i.year === fiscalYear && i.date.split('-')[1] === monthNumStr);
+
+    let totalIngresos = 0;
+    let totalEgresosPuros = 0;
+    currentMonthRecs.forEach(r => {
+      if (r.type === 'Ingreso') totalIngresos += Number(r.amount);
+      if (r.type === 'Egreso') totalEgresosPuros += Number(r.amount);
+    });
+
+    const presbiterio10 = Math.round(totalIngresos * 0.10);
+    const totalEgresosConPresbiterio = totalEgresosPuros + presbiterio10;
+
+    const saldoSiguienteMes = initialSaldo + totalIngresos - totalEgresosConPresbiterio;
+    
+    // SUMAS IGUALES: Ingresos Totales (Ingresos del mes + Saldo anterior)
+    const sumasIguales = totalIngresos + initialSaldo;
+
+    return {
+      initialSaldo,
+      totalIngresos,
+      totalEgresos: totalEgresosPuros,
+      presbiterio10,
+      totalEgresosConPresbiterio,
+      saldoSiguienteMes,
+      sumasIguales
+    };
   };
 
   const currentRecords = useMemo(() => {
@@ -449,7 +466,7 @@ export default function App() {
           )}
         </div>
 
-        {/* VISTA: BALANZA (OPTIMIZADA PARA IMPRESIÓN LIMPIA Y FIRMAS) */}
+        {/* VISTA: BALANZA */}
         {activeTab === 'balanza' && role !== 'Visitante' && (
           <div className="printable-balanza bg-white text-slate-900 rounded-3xl p-8 shadow-xl space-y-8">
             <div>
@@ -512,16 +529,17 @@ export default function App() {
                   <td className="no-print"></td>
                 </tr>
 
+                {/* SUMAS IGUALES CORREGIDAS EXACTAMENTE A LA PAR */}
                 <tr className="bg-slate-200 font-black border-t-2 border-slate-900">
                   <td colSpan="2" className="p-3.5 text-right border-r border-slate-400">SUMAS IGUALES</td>
                   <td className="p-3.5 text-right border-r border-slate-400">${monthTotals.sumasIguales.toLocaleString('es-MX')}.00</td>
-                  <td className="p-3.5 text-right border-r border-slate-400">${(monthTotals.totalEgresosConPresbiterio + monthTotals.initialSaldo).toLocaleString('es-MX')}.00</td>
+                  <td className="p-3.5 text-right border-r border-slate-400">${monthTotals.sumasIguales.toLocaleString('es-MX')}.00</td>
                   <td colSpan="2" className="bg-slate-100"></td>
                 </tr>
               </tbody>
             </table>
 
-            {/* LÍNEAS DE FIRMA PARA IMPRESIÓN */}
+            {/* LÍNEAS DE FIRMA */}
             <div className="signature-section pt-24 grid grid-cols-2 gap-16 text-center uppercase font-extrabold text-slate-900">
               <div className="border-t-2 border-slate-900 pt-3">
                 <p className="text-xs">TESORERÍA DE {activeModule.toUpperCase()}</p>
@@ -558,7 +576,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VISTA: DASHBOARD (CON GRÁFICA DE PASTEL INCLUIDA) */}
+        {/* VISTA: DASHBOARD */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -580,10 +598,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* GRÁFICA DE PASTEL DE GASTOS ACUMULADOS */}
               <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
                 <h3 className="font-bold text-slate-100">Distribución de Gastos Acumulados ({fiscalYear})</h3>
-                
                 <div className="flex flex-col sm:flex-row items-center gap-6 justify-around py-2">
                   {pieTotals.totalEgresosPure > 0 ? (
                     <svg viewBox="0 0 36 36" className="w-36 h-36 transform -rotate-90">
@@ -595,7 +611,6 @@ export default function App() {
                       Sin egresos
                     </div>
                   )}
-
                   <div className="space-y-3 flex-1">
                     <div className="p-3 bg-amber-950/30 rounded-2xl border border-amber-500/30">
                       <span className="text-xs font-bold text-amber-400">Operación ({pieTotals.pctOp.toFixed(1)}%)</span>
@@ -612,16 +627,30 @@ export default function App() {
           </div>
         )}
 
-        {/* VISTA: SEGURIDAD (CON CONFIGURACIÓN DE SALDO INICIAL Y BITÁCORA DE AUDITORÍA) */}
+        {/* VISTA: SEGURIDAD (CON BOTÓN DE DESCARGA DE CONCEPTOS EXCLUSIVO ADMIN) */}
         {activeTab === 'seguridad' && role === 'Admin' && (
           <div className="space-y-6 max-w-4xl mx-auto">
             <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-6">
               <div>
-                <h3 className="font-bold text-purple-400 text-base">Configuración de Seguridad, Claves y Saldos de Apertura ({fiscalYear})</h3>
-                <p className="text-xs text-slate-400">Define los PINs de acceso y los saldos iniciales con los que arranca el año fiscal en curso.</p>
+                <h3 className="font-bold text-purple-400 text-base">Configuración de Seguridad, Claves y Plantillas ({fiscalYear})</h3>
+                <p className="text-xs text-slate-400">Gestión de PINs, saldos iniciales anuales y descarga de la plantilla oficial de conceptos contables.</p>
               </div>
 
               {secMsg && <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-medium text-center">{secMsg}</div>}
+
+              {/* BOTÓN DE DESCARGA DE PLANTILLA DE CONCEPTOS */}
+              <div className="p-4 bg-purple-950/30 border border-purple-500/30 rounded-2xl flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-purple-300 uppercase">📥 Plantilla Oficial de Conceptos Contables</h4>
+                  <p className="text-[11px] text-slate-400">Descarga en formato Excel/CSV la lista oficial de Gastos de Operación y Ministerios.</p>
+                </div>
+                <button
+                  onClick={handleDownloadConceptsExcel}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition shadow"
+                >
+                  Descargar Conceptos
+                </button>
+              </div>
 
               <form onSubmit={handleUpdateAdminSettings} className="space-y-4">
                 <div className="grid grid-cols-3 gap-4">
@@ -658,7 +687,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* BITÁCORA DE AUDITORÍA DE MOVIMIENTOS ELIMINADOS */}
+            {/* BITÁCORA DE AUDITORÍA */}
             <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
               <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-amber-400">📜 Bitácora de Auditoría (Movimientos Eliminados)</h3>
