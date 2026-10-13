@@ -25,10 +25,19 @@ export default function App() {
   const [selectedRole, setSelectedRole] = useState('Tesorero');
   const [pinInput, setPinInput] = useState('');
   const [pins, setPins] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_pins_v8');
+    const saved = localStorage.getItem('balanza_ipap_pins_v9');
     return saved ? JSON.parse(saved) : { Admin: '1234', Tesorero: '2222', Visitante: '0000' };
   });
   const [pinError, setPinError] = useState('');
+
+  // Saldos iniciales de apertura de año configurables por el Admin
+  const [initialYearBalances, setInitialYearBalances] = useState(() => {
+    const saved = localStorage.getItem('balanza_ipap_initial_balances_v9');
+    return saved ? JSON.parse(saved) : { 
+      diezmos: { '2025': 287220, '2026': 287220, '2027': 287220, '2028': 287220 }, 
+      ofrendas: { '2025': 136504, '2026': 136504, '2027': 136504, '2028': 136504 } 
+    };
+  });
 
   const [cloudStatus, setCloudStatus] = useState("Conectando a Supabase...");
   const [toastMsg, setToastMsg] = useState('');
@@ -36,11 +45,11 @@ export default function App() {
   const [activeModule, setActiveModule] = useState('diezmos');
   const [activeTab, setActiveTab] = useState('balanza');
   const [selectedMonthIdx, setSelectedMonthIdx] = useState(11); // Diciembre por defecto
-  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v8') || '2025');
+  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v9') || '2025');
 
   const [budgetData, setBudgetData] = useState([]);
   const [auditLogs, setAuditLogs] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_audit_logs_v8');
+    const saved = localStorage.getItem('balanza_ipap_audit_logs_v9');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -55,7 +64,10 @@ export default function App() {
   const [newAdminPin, setNewAdminPin] = useState('');
   const [newTesoreroPin, setNewTesoreroPin] = useState('');
   const [newVisitantePin, setNewVisitantePin] = useState('');
+  const [customInitDiezmos, setCustomInitDiezmos] = useState('');
+  const [customInitOfrendas, setCustomInitOfrendas] = useState('');
   const [secMsg, setSecMsg] = useState('');
+  
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [confirmPinModalInput, setConfirmPinModalInput] = useState('');
   const [modalError, setModalError] = useState('');
@@ -65,7 +77,6 @@ export default function App() {
     setTimeout(() => setToastMsg(''), 4500);
   };
 
-  // Cargar datos desde Supabase
   const fetchData = async () => {
     try {
       const { data, error } = await supabase.from('movimientos_ipap').select('*').order('id', { ascending: true });
@@ -87,9 +98,10 @@ export default function App() {
     setEntryDate(`${fiscalYear}-${m}-01`);
   }, [fiscalYear, selectedMonthIdx]);
 
-  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v8', JSON.stringify(auditLogs)); }, [auditLogs]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v8', fiscalYear); }, [fiscalYear]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v8', JSON.stringify(pins)); }, [pins]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v9', JSON.stringify(auditLogs)); }, [auditLogs]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v9', fiscalYear); }, [fiscalYear]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v9', JSON.stringify(pins)); }, [pins]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_initial_balances_v9', JSON.stringify(initialYearBalances)); }, [initialYearBalances]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -101,6 +113,13 @@ export default function App() {
     } else {
       setPinError(`PIN incorrecto para el rol de ${selectedRole}.`);
     }
+  };
+
+  const handleLogout = () => {
+    showToast("☁️ Sesión cerrada con éxito. Todos los cambios están respaldados de forma segura en la nube.");
+    setTimeout(() => {
+      setRole(null);
+    }, 1200);
   };
 
   const handleSaveMovement = async (e) => {
@@ -145,7 +164,7 @@ export default function App() {
       setEntryConcept('');
       setEntryExtraData('');
       setEntryAmount('');
-      fetchData(); // Recargar datos frescos
+      fetchData();
     } catch (error) {
       alert("Error al guardar: " + error.message);
     }
@@ -161,13 +180,18 @@ export default function App() {
         if (error) throw error;
 
         const auditEntry = {
-          id: Date.now(), deletedAt: new Date().toLocaleString('es-MX'),
-          concept: target.concept, extraData: target.extraData || '',
-          amount: target.amount, date: target.date, module: target.module,
-          year: target.year, deletedBy: role
+          id: Date.now(), 
+          deletedAt: new Date().toLocaleString('es-MX'),
+          concept: target.concept, 
+          extraData: target.extraData || '',
+          amount: target.amount, 
+          date: target.date, 
+          module: target.module,
+          year: target.year, 
+          deletedBy: role
         };
         setAuditLogs([auditEntry, ...auditLogs]);
-        showToast(`🗑️ "${target.concept}" eliminado correctamente.`);
+        showToast(`🗑️ "${target.concept}" eliminado correctamente y registrado en la bitácora.`);
         fetchData();
       } catch(error) {
         alert("Error al eliminar: " + error.message);
@@ -196,16 +220,82 @@ export default function App() {
     }
   };
 
-  const handleUpdatePins = (e) => {
+  const handleUpdateAdminSettings = (e) => {
     e.preventDefault();
     const newP = { ...pins };
     if (newAdminPin.trim()) newP.Admin = newAdminPin.trim();
     if (newTesoreroPin.trim()) newP.Tesorero = newTesoreroPin.trim();
     if (newVisitantePin.trim()) newP.Visitante = newVisitantePin.trim();
     setPins(newP);
+
+    const newInitB = { ...initialYearBalances };
+    if (customInitDiezmos !== '') {
+      newInitB.diezmos[fiscalYear] = parseFloat(customInitDiezmos) || 0;
+    }
+    if (customInitOfrendas !== '') {
+      newInitB.ofrendas[fiscalYear] = parseFloat(customInitOfrendas) || 0;
+    }
+    setInitialYearBalances(newInitB);
+
     setNewAdminPin(''); setNewTesoreroPin(''); setNewVisitantePin('');
-    setSecMsg('¡Claves de acceso actualizadas con éxito!');
-    setTimeout(() => setSecMsg(''), 3000);
+    setCustomInitDiezmos(''); setCustomInitOfrendas('');
+    setSecMsg('¡Configuración de seguridad y saldos iniciales actualizada con éxito!');
+    setTimeout(() => setSecMsg(''), 4000);
+  };
+
+  // Cálculo encadenado mes a mes del saldo inicial y final
+  const calculateMonthTotalsForModule = (modName, targetMonthIdx) => {
+    const baseInit = initialYearBalances[modName]?.[fiscalYear] !== undefined 
+      ? initialYearBalances[modName][fiscalYear] 
+      : (modName === 'diezmos' ? 287220 : 136504);
+
+    let runningSaldo = baseInit;
+
+    for (let m = 0; m <= targetMonthIdx; m++) {
+      const monthStr = String(m + 1).padStart(2, '0');
+      const monthRecs = budgetData.filter(i => i.module === modName && i.year === fiscalYear && i.date.split('-')[1] === monthStr);
+
+      let mIng = 0;
+      let mEgr = 0;
+      monthRecs.forEach(r => {
+        if (r.type === 'Ingreso') mIng += Number(r.amount);
+        if (r.type === 'Egreso') mEgr += Number(r.amount);
+      });
+
+      const presb = Math.round(mIng * 0.10);
+      const totalSalidasMes = mEgr + presb;
+
+      if (m < targetMonthIdx) {
+        runningSaldo = runningSaldo + mIng - totalSalidasMes;
+      } else {
+        const prevSaldo = m === 0 ? baseInit : (() => {
+          let prevR = baseInit;
+          for (let pm = 0; pm < m; pm++) {
+            const pStr = String(pm + 1).padStart(2, '0');
+            const pRecs = budgetData.filter(i => i.module === modName && i.year === fiscalYear && i.date.split('-')[1] === pStr);
+            let pIng = 0, pEgr = 0;
+            pRecs.forEach(pr => {
+              if (pr.type === 'Ingreso') pIng += Number(pr.amount);
+              if (pr.type === 'Egreso') pEgr += Number(pr.amount);
+            });
+            prevR = prevR + pIng - (pEgr + Math.round(pIng * 0.10));
+          }
+          return prevR;
+        })();
+
+        return {
+          initialSaldo: prevSaldo,
+          totalIngresos: mIng,
+          totalEgresos: mEgr,
+          presbiterio10: presb,
+          totalEgresosConPresbiterio: totalSalidasMes,
+          saldoSiguienteMes: prevSaldo + mIng - totalSalidasMes,
+          sumasIguales: mIng + prevSaldo
+        };
+      }
+    }
+
+    return { initialSaldo: baseInit, totalIngresos: 0, totalEgresos: 0, presbiterio10: 0, totalEgresosConPresbiterio: 0, saldoSiguienteMes: baseInit, sumasIguales: baseInit };
   };
 
   const currentRecords = useMemo(() => {
@@ -215,23 +305,9 @@ export default function App() {
   }, [budgetData, activeModule, fiscalYear, selectedMonthIdx]);
 
   const monthTotals = useMemo(() => {
-    let totalIngresos = 0;
-    let totalEgresos = 0;
-    currentRecords.forEach(i => {
-      if (i.type === 'Ingreso') totalIngresos += Number(i.amount);
-      if (i.type === 'Egreso') totalEgresos += Number(i.amount);
-    });
+    return calculateMonthTotalsForModule(activeModule, selectedMonthIdx);
+  }, [budgetData, activeModule, fiscalYear, selectedMonthIdx, initialYearBalances]);
 
-    const presbiterio10 = Math.round(totalIngresos * 0.10);
-    const totalEgresosConPresbiterio = totalEgresos + presbiterio10;
-    const initialSaldo = activeModule === 'diezmos' ? 287220 : 136504; // Saldos estáticos de la app original
-    const saldoSiguienteMes = initialSaldo + totalIngresos - totalEgresosConPresbiterio;
-    const sumasIguales = totalIngresos + initialSaldo;
-
-    return { totalIngresos, totalEgresos, presbiterio10, totalEgresosConPresbiterio, initialSaldo, saldoSiguienteMes, sumasIguales };
-  }, [currentRecords, activeModule]);
-
-  // Dashboards calculations
   const consolidatedMonthlyData = useMemo(() => {
     return MONTHS.map((m, idx) => {
       const monthNum = String(idx + 1).padStart(2, '0');
@@ -286,7 +362,6 @@ export default function App() {
     };
   }, [budgetData, fiscalYear]);
 
-  // VISTAS
   if (!role) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950 font-sans">
@@ -323,13 +398,14 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-y-auto">
       {toastMsg && (
-        <div className="fixed top-5 right-5 z-50 bg-emerald-600 text-white font-bold text-xs px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
+        <div className="no-print fixed top-5 right-5 z-50 bg-emerald-600 text-white font-bold text-xs px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
           <span>{toastMsg}</span>
           <button onClick={() => setToastMsg('')} className="text-emerald-200">✕</button>
         </div>
       )}
 
-      <header className="bg-slate-900 border-b border-slate-800 p-4 flex justify-between items-center shadow-md">
+      {/* HEADER OCULTO AL IMPRIMIR */}
+      <header className="no-print bg-slate-900 border-b border-slate-800 p-4 flex justify-between items-center shadow-md">
         <div>
           <h1 className="font-bold text-lg text-white">BALANZA DE ESTADOS {fiscalYear}</h1>
           <p className="text-xs text-slate-400">Control Contable IPAP</p>
@@ -338,45 +414,53 @@ export default function App() {
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-emerald-400">{cloudStatus}</span>
           <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-2xl">
             <span className="text-xs font-bold text-blue-300">Año:</span>
-            <select value={fiscalYear} disabled={role !== 'Admin'} onChange={(e) => setFiscalYear(e.target.value)} className="bg-transparent text-amber-400 text-xs font-bold outline-none">
+            <select value={fiscalYear} disabled={role !== 'Admin'} onChange={(e) => setFiscalYear(e.target.value)} className="bg-transparent text-amber-400 text-xs font-bold outline-none cursor-pointer">
               {FISCAL_YEARS.map(y => <option key={y} value={y} className="bg-slate-900 text-slate-100">{y}</option>)}
             </select>
           </div>
-          <button onClick={() => setRole(null)} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold">Salir</button>
+          <button onClick={handleLogout} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition">Salir</button>
         </div>
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
         {role !== 'Visitante' && (
-          <div className="flex justify-between items-center bg-slate-900 p-3 rounded-2xl border border-slate-800">
+          <div className="no-print flex justify-between items-center bg-slate-900 p-3 rounded-2xl border border-slate-800">
             <div className="flex gap-2">
-              <button onClick={() => setActiveModule('diezmos')} className={`px-6 py-2.5 rounded-xl text-sm font-extrabold border ${activeModule === 'diezmos' ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-950 text-slate-400 border-slate-800'}`}>📘 DIEZMOS</button>
-              <button onClick={() => setActiveModule('ofrendas')} className={`px-6 py-2.5 rounded-xl text-sm font-extrabold border ${activeModule === 'ofrendas' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-950 text-slate-400 border-slate-800'}`}>📗 OFRENDAS</button>
+              <button onClick={() => setActiveModule('diezmos')} className={`px-6 py-2.5 rounded-xl text-sm font-extrabold border transition ${activeModule === 'diezmos' ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-950 text-slate-400 border-slate-800'}`}>📘 DIEZMOS</button>
+              <button onClick={() => setActiveModule('ofrendas')} className={`px-6 py-2.5 rounded-xl text-sm font-extrabold border transition ${activeModule === 'ofrendas' ? 'bg-emerald-600 border-emerald-400 text-white shadow-lg' : 'bg-slate-950 text-slate-400 border-slate-800'}`}>📗 OFRENDAS</button>
             </div>
             <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
               <span className="text-xs font-bold text-slate-400">Mes:</span>
-              <select value={selectedMonthIdx} onChange={(e) => setSelectedMonthIdx(parseInt(e.target.value))} className="bg-transparent text-xs font-bold text-amber-400 outline-none">
+              <select value={selectedMonthIdx} onChange={(e) => setSelectedMonthIdx(parseInt(e.target.value))} className="bg-transparent text-xs font-bold text-amber-400 outline-none cursor-pointer">
                 {MONTHS_FULL.map((m, i) => <option key={m} value={i} className="bg-slate-900">{m}</option>)}
               </select>
             </div>
           </div>
         )}
 
-        <div className="flex gap-3 bg-slate-900/60 p-2 rounded-2xl border border-slate-800">
-          {role !== 'Visitante' && <button onClick={() => setActiveTab('balanza')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeTab === 'balanza' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>📄 Balanza</button>}
-          {role !== 'Visitante' && <button onClick={() => setActiveTab('captura')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeTab === 'captura' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>✍️ Capturar</button>}
-          <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeTab === 'dashboard' ? 'bg-amber-600 text-white' : 'text-slate-400'}`}>📊 Dashboards</button>
-          {role === 'Admin' && <button onClick={() => setActiveTab('seguridad')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeTab === 'seguridad' ? 'bg-purple-600 text-white' : 'text-slate-400'}`}>⚙️ Seguridad</button>}
+        <div className="no-print flex gap-3 bg-slate-900/60 p-2 rounded-2xl border border-slate-800">
+          {role !== 'Visitante' && <button onClick={() => setActiveTab('balanza')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'balanza' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>📄 Balanza</button>}
+          {role !== 'Visitante' && <button onClick={() => setActiveTab('captura')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'captura' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>✍️ Capturar</button>}
+          <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'dashboard' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>📊 Dashboards</button>
+          {role === 'Admin' && <button onClick={() => setActiveTab('seguridad')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'seguridad' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>⚙️ Seguridad</button>}
           
           {activeTab === 'balanza' && (
-            <button onClick={() => window.print()} className="ml-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 rounded-xl text-xs font-bold flex items-center gap-2">🖨️ Imprimir / PDF</button>
+            <button onClick={() => window.print()} className="ml-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 rounded-xl text-xs font-bold flex items-center gap-2 shadow">🖨️ Imprimir / PDF</button>
           )}
         </div>
 
-        {/* VISTA: BALANZA */}
+        {/* VISTA: BALANZA (OPTIMIZADA PARA IMPRESIÓN LIMPIA Y FIRMAS) */}
         {activeTab === 'balanza' && role !== 'Visitante' && (
-          <div className="bg-white text-slate-900 rounded-3xl p-8 shadow-xl">
-            <h2 className="text-2xl font-black uppercase text-center border-b-2 border-slate-900 pb-4 mb-6">TESORERÍA DE {activeModule} <br/><span className="text-sm">01 AL 31 DE {MONTHS_FULL[selectedMonthIdx]} DEL {fiscalYear}</span></h2>
+          <div className="printable-balanza bg-white text-slate-900 rounded-3xl p-8 shadow-xl space-y-8">
+            <div>
+              <h2 className="text-2xl font-black uppercase text-center border-b-2 border-slate-900 pb-4 mb-2">
+                TESORERÍA DE {activeModule}
+              </h2>
+              <p className="text-sm font-extrabold text-center uppercase tracking-widest text-slate-800">
+                01 AL 31 DE {MONTHS_FULL[selectedMonthIdx]} DEL {fiscalYear}
+              </p>
+            </div>
+
             <table className="w-full text-sm text-left border-collapse border border-slate-900">
               <thead className="bg-slate-100 border-b-2 border-slate-900">
                 <tr>
@@ -384,7 +468,7 @@ export default function App() {
                   <th className="p-3 border-r border-slate-900">CONCEPTO</th>
                   <th className="p-3 text-right border-r border-slate-900">INGRESOS</th>
                   <th className="p-3 text-right border-r border-slate-900">EGRESOS</th>
-                  <th className="p-3 text-right bg-slate-50">SALDO</th>
+                  <th className="p-3 text-right bg-slate-50 border-r border-slate-900">SALDO</th>
                   <th className="p-2 text-center no-print">ACCIÓN</th>
                 </tr>
               </thead>
@@ -392,43 +476,60 @@ export default function App() {
                 <tr className="bg-slate-50 font-bold border-b border-slate-300">
                   <td className="p-2.5 text-center border-r border-slate-300">-</td>
                   <td className="p-2.5 border-r border-slate-300">SALDO DEL MES ANTERIOR</td>
-                  <td className="p-2.5 border-r border-slate-300"></td><td className="p-2.5 border-r border-slate-300"></td>
-                  <td className="p-2.5 text-right bg-slate-100">${monthTotals.initialSaldo.toLocaleString('es-MX')}.00</td>
+                  <td className="p-2.5 border-r border-slate-300"></td>
+                  <td className="p-2.5 border-r border-slate-300"></td>
+                  <td className="p-2.5 text-right bg-slate-100 border-r border-slate-300">${monthTotals.initialSaldo.toLocaleString('es-MX')}.00</td>
                   <td className="no-print"></td>
                 </tr>
-                {(() => {
-                  let balance = monthTotals.initialSaldo;
-                  return currentRecords.map(item => {
-                    if (item.type === 'Ingreso') balance += Number(item.amount);
-                    if (item.type === 'Egreso') balance -= Number(item.amount);
-                    return (
-                      <tr key={item.id} className="border-b border-slate-300 hover:bg-slate-50">
-                        <td className="p-2.5 border-r border-slate-300">{item.date}</td>
-                        <td className="p-2.5 border-r border-slate-300 font-semibold">{item.concept} {item.extraData && <span className="text-slate-500 italic">({item.extraData})</span>}</td>
-                        <td className="p-2.5 text-right font-bold text-emerald-800 border-r border-slate-300">{item.type === 'Ingreso' ? `$${Number(item.amount).toLocaleString('es-MX')}.00` : ''}</td>
-                        <td className="p-2.5 text-right font-bold text-rose-800 border-r border-slate-300">{item.type === 'Egreso' ? `$${Number(item.amount).toLocaleString('es-MX')}.00` : ''}</td>
-                        <td className="p-2.5 text-right font-bold">${balance.toLocaleString('es-MX')}.00</td>
-                        <td className="p-1 text-center no-print border-l border-slate-300"><button onClick={() => handleDeleteRecord(item.id)} className="p-1.5 bg-rose-100 text-rose-800 rounded-lg">🗑️</button></td>
-                      </tr>
-                    );
-                  });
-                })()}
+
+                {currentRecords.map(item => (
+                  <tr key={item.id} className="border-b border-slate-300 hover:bg-slate-50">
+                    <td className="p-2.5 border-r border-slate-300">{item.date}</td>
+                    <td className="p-2.5 border-r border-slate-300 font-semibold">
+                      {item.concept} {item.extraData && <span className="text-slate-500 italic">({item.extraData})</span>}
+                    </td>
+                    <td className="p-2.5 text-right font-bold text-emerald-800 border-r border-slate-300">
+                      {item.type === 'Ingreso' ? `$${Number(item.amount).toLocaleString('es-MX')}.00` : ''}
+                    </td>
+                    <td className="p-2.5 text-right font-bold text-rose-800 border-r border-slate-300">
+                      {item.type === 'Egreso' ? `$${Number(item.amount).toLocaleString('es-MX')}.00` : ''}
+                    </td>
+                    <td className="p-2.5 text-right font-bold border-r border-slate-300">
+                      ${(monthTotals.initialSaldo + currentRecords.slice(0, currentRecords.indexOf(item) + 1).reduce((acc, cur) => cur.type === 'Ingreso' ? acc + Number(cur.amount) : acc - Number(cur.amount), 0)).toLocaleString('es-MX')}.00
+                    </td>
+                    <td className="p-1 text-center no-print border-l border-slate-300">
+                      <button onClick={() => handleDeleteRecord(item.id)} className="p-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg transition" title="Eliminar movimiento">🗑️</button>
+                    </td>
+                  </tr>
+                ))}
+
                 <tr className="bg-slate-100 font-bold border-t-2 border-slate-400">
                   <td className="p-2.5 border-r border-slate-300">FIN DE MES</td>
                   <td className="p-2.5 border-r border-slate-300">10% PRESBITERIO (AUTOMÁTICO)</td>
                   <td className="p-2.5 border-r border-slate-300"></td>
                   <td className="p-2.5 text-right text-rose-800 border-r border-slate-300">${monthTotals.presbiterio10.toLocaleString('es-MX')}.00</td>
-                  <td className="p-2.5 text-right">${(monthTotals.initialSaldo + monthTotals.totalIngresos - monthTotals.totalEgresosConPresbiterio).toLocaleString('es-MX')}.00</td>
+                  <td className="p-2.5 text-right border-r border-slate-300">${monthTotals.saldoSiguienteMes.toLocaleString('es-MX')}.00</td>
                   <td className="no-print"></td>
                 </tr>
+
                 <tr className="bg-slate-200 font-black border-t-2 border-slate-900">
                   <td colSpan="2" className="p-3.5 text-right border-r border-slate-400">SUMAS IGUALES</td>
                   <td className="p-3.5 text-right border-r border-slate-400">${monthTotals.sumasIguales.toLocaleString('es-MX')}.00</td>
-                  <td className="p-3.5 text-right border-r border-slate-400">${monthTotals.sumasIguales.toLocaleString('es-MX')}.00</td>
+                  <td className="p-3.5 text-right border-r border-slate-400">${(monthTotals.totalEgresosConPresbiterio + monthTotals.initialSaldo).toLocaleString('es-MX')}.00</td>
                   <td colSpan="2" className="bg-slate-100"></td>
                 </tr>
               </tbody>
             </table>
+
+            {/* LÍNEAS DE FIRMA PARA IMPRESIÓN */}
+            <div className="signature-section pt-24 grid grid-cols-2 gap-16 text-center uppercase font-extrabold text-slate-900">
+              <div className="border-t-2 border-slate-900 pt-3">
+                <p className="text-xs">TESORERÍA DE {activeModule.toUpperCase()}</p>
+              </div>
+              <div className="border-t-2 border-slate-900 pt-3">
+                <p className="text-xs">PASTOR</p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -452,62 +553,149 @@ export default function App() {
               )}
               <input type="text" placeholder="Dato Extra Opcional (Ej. Recibo No. 12)" value={entryExtraData} onChange={e => setEntryExtraData(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100" />
               <input type="number" step="1" required placeholder="Monto ($ MXN)" value={entryAmount} onChange={e => setEntryAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100" />
-              <button type="submit" className="w-full py-3 bg-emerald-600 font-bold rounded-xl text-xs text-white">Guardar Registro en Supabase</button>
+              <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 font-bold rounded-xl text-xs text-white transition shadow">Guardar Registro en Supabase</button>
             </form>
           </div>
         )}
 
-        {/* VISTA: DASHBOARD */}
+        {/* VISTA: DASHBOARD (CON GRÁFICA DE PASTEL INCLUIDA) */}
         {activeTab === 'dashboard' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
-              <h3 className="font-bold text-slate-100 mb-6">Entradas vs Salidas Mensuales Consolidadas</h3>
-              <div className="flex h-48 items-end gap-2">
-                {consolidatedMonthlyData.map(d => {
-                  const maxVal = Math.max(...consolidatedMonthlyData.map(x => Math.max(x.totalEntradas, x.totalSalidas)), 1);
-                  return (
-                    <div key={d.monthLabel} className="flex-1 flex flex-col items-center justify-end h-full">
-                      <div className="flex items-end gap-1 w-full h-full justify-center">
-                        <div style={{ height: `${(d.totalEntradas/maxVal)*100}%` }} className="w-3 bg-emerald-500 rounded-t" title={`Entradas: $${d.totalEntradas}`}></div>
-                        <div style={{ height: `${(d.totalSalidas/maxVal)*100}%` }} className="w-3 bg-rose-500 rounded-t" title={`Salidas: $${d.totalSalidas}`}></div>
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
+                <h3 className="font-bold text-slate-100 mb-6">Entradas vs Salidas Mensuales Consolidadas ({fiscalYear})</h3>
+                <div className="flex h-48 items-end gap-2">
+                  {consolidatedMonthlyData.map(d => {
+                    const maxVal = Math.max(...consolidatedMonthlyData.map(x => Math.max(x.totalEntradas, x.totalSalidas)), 1);
+                    return (
+                      <div key={d.monthLabel} className="flex-1 flex flex-col items-center justify-end h-full group">
+                        <div className="flex items-end gap-1 w-full h-full justify-center">
+                          <div style={{ height: `${(d.totalEntradas/maxVal)*100}%` }} className="w-3 bg-emerald-500 rounded-t" title={`Entradas: $${d.totalEntradas}`}></div>
+                          <div style={{ height: `${(d.totalSalidas/maxVal)*100}%` }} className="w-3 bg-rose-500 rounded-t" title={`Salidas: $${d.totalSalidas}`}></div>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-bold mt-2">{d.monthLabel}</span>
                       </div>
-                      <span className="text-[10px] text-slate-400 font-bold mt-2">{d.monthLabel}</span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* GRÁFICA DE PASTEL DE GASTOS ACUMULADOS */}
+              <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
+                <h3 className="font-bold text-slate-100">Distribución de Gastos Acumulados ({fiscalYear})</h3>
+                
+                <div className="flex flex-col sm:flex-row items-center gap-6 justify-around py-2">
+                  {pieTotals.totalEgresosPure > 0 ? (
+                    <svg viewBox="0 0 36 36" className="w-36 h-36 transform -rotate-90">
+                      <circle cx="18" cy="18" r="15.915" fill="transparent" stroke="#f59e0b" strokeWidth="5.5" strokeDasharray={`${pieTotals.pctOp} ${100 - pieTotals.pctOp}`} strokeDashoffset="0"></circle>
+                      <circle cx="18" cy="18" r="15.915" fill="transparent" stroke="#f43f5e" strokeWidth="5.5" strokeDasharray={`${pieTotals.pctMin} ${100 - pieTotals.pctMin}`} strokeDashoffset={`-${pieTotals.pctOp}`}></circle>
+                    </svg>
+                  ) : (
+                    <div className="w-36 h-36 rounded-full border-2 border-dashed border-slate-800 flex items-center justify-center text-slate-500 font-bold text-xs text-center p-2">
+                      Sin egresos
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
-              <h3 className="font-bold text-slate-100">Distribución de Gastos Acumulados ({fiscalYear})</h3>
-              <div className="p-4 bg-amber-950/30 rounded-2xl border border-amber-500/30">
-                <span className="text-xs font-bold text-amber-400">Gastos Operación ({pieTotals.pctOp.toFixed(1)}%)</span>
-                <p className="text-2xl font-black text-amber-400">${pieTotals.opTotal.toLocaleString('es-MX')}</p>
-                <p className="text-xs text-slate-400">Incluye ${(pieTotals.totalPresbiterio10).toLocaleString('es-MX')} de Presbiterio</p>
-              </div>
-              <div className="p-4 bg-rose-950/30 rounded-2xl border border-rose-500/30">
-                <span className="text-xs font-bold text-rose-400">Gastos Ministerios ({pieTotals.pctMin.toFixed(1)}%)</span>
-                <p className="text-2xl font-black text-rose-400">${pieTotals.minTotal.toLocaleString('es-MX')}</p>
+                  )}
+
+                  <div className="space-y-3 flex-1">
+                    <div className="p-3 bg-amber-950/30 rounded-2xl border border-amber-500/30">
+                      <span className="text-xs font-bold text-amber-400">Operación ({pieTotals.pctOp.toFixed(1)}%)</span>
+                      <p className="text-xl font-black text-amber-400">${pieTotals.opTotal.toLocaleString('es-MX')}</p>
+                    </div>
+                    <div className="p-3 bg-rose-950/30 rounded-2xl border border-rose-500/30">
+                      <span className="text-xs font-bold text-rose-400">Ministerios ({pieTotals.pctMin.toFixed(1)}%)</span>
+                      <p className="text-xl font-black text-rose-400">${pieTotals.minTotal.toLocaleString('es-MX')}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* VISTA: SEGURIDAD */}
+        {/* VISTA: SEGURIDAD (CON CONFIGURACIÓN DE SALDO INICIAL Y BITÁCORA DE AUDITORÍA) */}
         {activeTab === 'seguridad' && role === 'Admin' && (
-          <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl max-w-3xl mx-auto space-y-6">
-            <h3 className="font-bold text-purple-400 mb-4">Configuración de Seguridad y Claves</h3>
-            <form onSubmit={handleUpdatePins} className="grid grid-cols-3 gap-4 mb-4">
-              <input type="text" placeholder="Nuevo PIN Admin" value={newAdminPin} onChange={e => setNewAdminPin(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
-              <input type="text" placeholder="Nuevo PIN Tesorero" value={newTesoreroPin} onChange={e => setNewTesoreroPin(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
-              <input type="text" placeholder="Nuevo PIN Visitante" value={newVisitantePin} onChange={e => setNewVisitantePin(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
-              <button type="submit" className="col-span-3 py-2.5 bg-purple-600 font-bold rounded-xl text-xs text-white">Guardar Claves</button>
-            </form>
-            <div className="pt-4 border-t border-slate-800">
-              <button onClick={() => setIsResetModalOpen(true)} className="w-full py-2.5 bg-rose-600/20 text-rose-300 border border-rose-500/40 font-bold rounded-xl text-xs">🧹 Formatear Balanza {activeModule.toUpperCase()} ({fiscalYear}) a $0</button>
+          <div className="space-y-6 max-w-4xl mx-auto">
+            <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-6">
+              <div>
+                <h3 className="font-bold text-purple-400 text-base">Configuración de Seguridad, Claves y Saldos de Apertura ({fiscalYear})</h3>
+                <p className="text-xs text-slate-400">Define los PINs de acceso y los saldos iniciales con los que arranca el año fiscal en curso.</p>
+              </div>
+
+              {secMsg && <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-medium text-center">{secMsg}</div>}
+
+              <form onSubmit={handleUpdateAdminSettings} className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">PIN Admin</label>
+                    <input type="text" placeholder="Nuevo PIN Admin" value={newAdminPin} onChange={e => setNewAdminPin(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">PIN Tesorero</label>
+                    <input type="text" placeholder="Nuevo PIN Tesorero" value={newTesoreroPin} onChange={e => setNewTesoreroPin(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">PIN Visitante</label>
+                    <input type="text" placeholder="Nuevo PIN Visitante" value={newVisitantePin} onChange={e => setNewVisitantePin(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-800">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Saldo Inicial Diezmos ({fiscalYear})</label>
+                    <input type="number" placeholder={initialYearBalances.diezmos[fiscalYear] || 287220} value={customInitDiezmos} onChange={e => setCustomInitDiezmos(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Saldo Inicial Ofrendas ({fiscalYear})</label>
+                    <input type="number" placeholder={initialYearBalances.ofrendas[fiscalYear] || 136504} value={customInitOfrendas} onChange={e => setCustomInitOfrendas(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200" />
+                  </div>
+                </div>
+
+                <button type="submit" className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 font-bold rounded-xl text-xs text-white transition">Guardar Configuración y Saldos</button>
+              </form>
+
+              <div className="pt-4 border-t border-slate-800">
+                <button onClick={() => setIsResetModalOpen(true)} className="w-full py-2.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/40 font-bold rounded-xl text-xs transition">🧹 Formatear Balanza de {activeModule.toUpperCase()} ({fiscalYear}) a $0</button>
+              </div>
+            </div>
+
+            {/* BITÁCORA DE AUDITORÍA DE MOVIMIENTOS ELIMINADOS */}
+            <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-amber-400">📜 Bitácora de Auditoría (Movimientos Eliminados)</h3>
+                <span className="text-xs bg-amber-500/20 text-amber-300 font-bold px-2.5 py-1 rounded-lg">{auditLogs.length} Registros</span>
+              </div>
+
+              {auditLogs.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-4">No hay registros de eliminaciones en este momento.</p>
+              ) : (
+                <div className="overflow-x-auto max-h-60">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead className="bg-slate-950 text-slate-400 font-bold uppercase sticky top-0">
+                      <tr>
+                        <th className="p-2 border-b border-slate-800">Fecha Eliminación</th>
+                        <th className="p-2 border-b border-slate-800">Módulo</th>
+                        <th className="p-2 border-b border-slate-800">Concepto</th>
+                        <th className="p-2 border-b border-slate-800 text-right">Monto</th>
+                        <th className="p-2 border-b border-slate-800 text-center">Eliminado por</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {auditLogs.map(log => (
+                        <tr key={log.id} className="hover:bg-slate-800/30">
+                          <td className="p-2 text-slate-400">{log.deletedAt}</td>
+                          <td className="p-2 uppercase font-bold text-blue-400">{log.module}</td>
+                          <td className="p-2 text-slate-200">{log.concept} {log.extraData ? `(${log.extraData})` : ''}</td>
+                          <td className="p-2 text-right text-rose-400">${Number(log.amount).toLocaleString('es-MX')}</td>
+                          <td className="p-2 text-center text-amber-300 font-sans">{log.deletedBy}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
-
       </main>
 
       {/* MODAL RESET */}
@@ -516,16 +704,29 @@ export default function App() {
           <div className="bg-slate-900 border border-rose-500/40 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4">
             <h3 className="font-bold text-rose-400">⚠️ Confirmar Formateo {activeModule.toUpperCase()}</h3>
             <form onSubmit={handleConfirmZeroReset} className="space-y-4">
-              <input type="password" required placeholder="PIN Admin..." value={confirmPinModalInput} onChange={e => setConfirmPinModalInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100" />
+              <input type="password" required placeholder="PIN Admin..." value={confirmPinModalInput} onChange={e => setConfirmPinModalInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100" />
               {modalError && <div className="text-rose-400 text-xs text-center">{modalError}</div>}
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setIsResetModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-rose-600 text-white text-xs font-bold rounded-xl">Confirmar</button>
+                <button type="submit" className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition">Confirmar</button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* ESTILOS CSS EXCLUSIVOS PARA IMPRESIÓN LIMPIA Y FIRMAS */}
+      <style>{`
+        @media print {
+          body { background: #ffffff !important; color: #000000 !important; }
+          .no-print { display: none !important; }
+          header, footer, nav { display: none !important; }
+          .printable-balanza { background: #ffffff !important; color: #000000 !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
+          table { border-color: #000000 !important; background: #ffffff !important; width: 100% !important; }
+          th, td { border-color: #333333 !important; color: #000000 !important; }
+          .signature-section { display: grid !important; margin-top: 80px !important; page-break-inside: avoid; }
+        }
+      `}</style>
     </div>
   );
 }
