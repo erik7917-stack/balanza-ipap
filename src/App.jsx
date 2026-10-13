@@ -25,13 +25,13 @@ export default function App() {
   const [selectedRole, setSelectedRole] = useState('Tesorero');
   const [pinInput, setPinInput] = useState('');
   const [pins, setPins] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_pins_v10');
+    const saved = localStorage.getItem('balanza_ipap_pins_v11');
     return saved ? JSON.parse(saved) : { Admin: '1234', Tesorero: '2222', Visitante: '0000' };
   });
   const [pinError, setPinError] = useState('');
 
   const [initialYearBalances, setInitialYearBalances] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_initial_balances_v10');
+    const saved = localStorage.getItem('balanza_ipap_initial_balances_v11');
     return saved ? JSON.parse(saved) : { 
       diezmos: { '2025': 287220, '2026': 287220, '2027': 287220, '2028': 287220 }, 
       ofrendas: { '2025': 136504, '2026': 136504, '2027': 136504, '2028': 136504 } 
@@ -44,11 +44,11 @@ export default function App() {
   const [activeModule, setActiveModule] = useState('diezmos');
   const [activeTab, setActiveTab] = useState('balanza');
   const [selectedMonthIdx, setSelectedMonthIdx] = useState(8); // Septiembre por defecto
-  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v10') || '2026');
+  const [fiscalYear, setFiscalYear] = useState(() => localStorage.getItem('balanza_ipap_fiscal_year_v11') || '2026');
 
   const [budgetData, setBudgetData] = useState([]);
   const [auditLogs, setAuditLogs] = useState(() => {
-    const saved = localStorage.getItem('balanza_ipap_audit_logs_v10');
+    const saved = localStorage.getItem('balanza_ipap_audit_logs_v11');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -97,10 +97,10 @@ export default function App() {
     setEntryDate(`${fiscalYear}-${m}-01`);
   }, [fiscalYear, selectedMonthIdx]);
 
-  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v10', JSON.stringify(auditLogs)); }, [auditLogs]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v10', fiscalYear); }, [fiscalYear]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v10', JSON.stringify(pins)); }, [pins]);
-  useEffect(() => { localStorage.setItem('balanza_ipap_initial_balances_v10', JSON.stringify(initialYearBalances)); }, [initialYearBalances]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_audit_logs_v11', JSON.stringify(auditLogs)); }, [auditLogs]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_fiscal_year_v11', fiscalYear); }, [fiscalYear]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_pins_v11', JSON.stringify(pins)); }, [pins]);
+  useEffect(() => { localStorage.setItem('balanza_ipap_initial_balances_v11', JSON.stringify(initialYearBalances)); }, [initialYearBalances]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -242,27 +242,76 @@ export default function App() {
     setTimeout(() => setSecMsg(''), 4000);
   };
 
-  // Función para descargar la plantilla Excel de conceptos contables
-  const handleDownloadConceptsExcel = () => {
-    let csvContent = "data:text/csv;charset=utf-8,CLASIFICACION,CONCEPTO\n";
-    INITIAL_EXPENSE_CONCEPTS.GASTOS_OPERACION.forEach(item => {
-      csvContent += `GASTOS DE OPERACION,"${item}"\n`;
+  // Generador dinámico y avanzado de Excel (CSV) con ingresos mensuales arriba y conceptos agrupados por mes
+  const handleDownloadAdvancedExcel = () => {
+    let csvContent = "\uFEFF"; // BOM para correcta codificación UTF-8 en Excel
+    csvContent += `MATRIZ CONCENTRADA ANUAL IPAP - AÑO ${fiscalYear}\n\n`;
+
+    // Cabecera de meses
+    let headerRow = "CLASIFICACION,CONCEPTO";
+    MONTHS.forEach(m => headerRow += `,${m}`);
+    headerRow += ",TOTAL ANUAL\n";
+    csvContent += headerRow;
+
+    // 1. Ingresos Totales por Mes (Diezmos y Ofrendas)
+    const getMonthlyIncomeByMod = (modName) => {
+      return MONTHS.map((_, idx) => {
+        const mStr = String(idx + 1).padStart(2, '0');
+        const recs = budgetData.filter(i => i.module === modName && i.year === fiscalYear && i.date.split('-')[1] === mStr && i.type === 'Ingreso');
+        return recs.reduce((sum, r) => sum + Number(r.amount), 0);
+      });
+    };
+
+    const diezmosIngs = getMonthlyIncomeByMod('diezmos');
+    const ofrendasIngs = getMonthlyIncomeByMod('ofrendas');
+
+    const appendRowData = (category, conceptName, monthlyValues) => {
+      let row = `"${category}","${conceptName}"`;
+      let rowTotal = 0;
+      monthlyValues.forEach(val => {
+        row += `,${val}`;
+        rowTotal += val;
+      });
+      row += `,${rowTotal}\n`;
+      csvContent += row;
+    };
+
+    appendRowData("INGRESOS", "TOTAL INGRESOS DIEZMOS", diezmosIngs);
+    appendRowData("INGRESOS", "TOTAL INGRESOS OFRENDAS", ofrendasIngs);
+    csvContent += "\n";
+
+    // 2. Gastos de Operación y Ministerios agrupados por concepto y mes
+    const getExpenseByConceptAndMonth = (conceptTarget) => {
+      return MONTHS.map((_, idx) => {
+        const mStr = String(idx + 1).padStart(2, '0');
+        const recs = budgetData.filter(i => i.year === fiscalYear && i.date.split('-')[1] === mStr && i.type === 'Egreso' && i.concept.trim().toUpperCase() === conceptTarget.trim().toUpperCase());
+        return recs.reduce((sum, r) => sum + Number(r.amount), 0);
+      });
+    };
+
+    csvContent += "GASTOS DE OPERACION\n";
+    INITIAL_EXPENSE_CONCEPTS.GASTOS_OPERACION.forEach(concept => {
+      const vals = getExpenseByConceptAndMonth(concept);
+      appendRowData("GASTOS DE OPERACION", concept, vals);
     });
-    INITIAL_EXPENSE_CONCEPTS.GASTOS_MINISTERIOS.forEach(item => {
-      csvContent += `GASTOS DE MINISTERIOS,"${item}"\n`;
+
+    csvContent += "\nGASTOS DE MINISTERIOS\n";
+    INITIAL_EXPENSE_CONCEPTS.GASTOS_MINISTERIOS.forEach(concept => {
+      const vals = getExpenseByConceptAndMonth(concept);
+      appendRowData("GASTOS DE MINISTERIOS", concept, vals);
     });
-    
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Plantilla_Conceptos_Gastos_IPAP_${fiscalYear}.csv`);
+    link.setAttribute("download", `Concentrado_Anual_IPAP_${fiscalYear}.csv`);
     document.body.appendChild(link);
     link.click();
     link.remove();
-    showToast("📥 ¡Plantilla de conceptos descargada con éxito!");
+    showToast("📥 ¡Matriz concentrada en Excel descargada con éxito!");
   };
 
-  // Cálculo encadenado mes a mes con la corrección exacta de sumas iguales
+  // Cálculo encadenado mes a mes
   const calculateMonthTotalsForModule = (modName, targetMonthIdx) => {
     const baseInit = initialYearBalances[modName]?.[fiscalYear] !== undefined 
       ? initialYearBalances[modName][fiscalYear] 
@@ -300,8 +349,6 @@ export default function App() {
     const totalEgresosConPresbiterio = totalEgresosPuros + presbiterio10;
 
     const saldoSiguienteMes = initialSaldo + totalIngresos - totalEgresosConPresbiterio;
-    
-    // SUMAS IGUALES: Ingresos Totales (Ingresos del mes + Saldo anterior)
     const sumasIguales = totalIngresos + initialSaldo;
 
     return {
@@ -466,7 +513,7 @@ export default function App() {
           )}
         </div>
 
-        {/* VISTA: BALANZA */}
+        {/* VISTA: BALANZA CON ORDEN EXACTO DEL FORMATO FÍSICO */}
         {activeTab === 'balanza' && role !== 'Visitante' && (
           <div className="printable-balanza bg-white text-slate-900 rounded-3xl p-8 shadow-xl space-y-8">
             <div>
@@ -529,9 +576,32 @@ export default function App() {
                   <td className="no-print"></td>
                 </tr>
 
-                {/* SUMAS IGUALES CORREGIDAS EXACTAMENTE A LA PAR */}
+                {/* FILAS FINALES EXACTAS COMO EL FORMATO FÍSICO */}
+                <tr className="bg-slate-100 font-extrabold border-t-2 border-slate-900">
+                  <td colSpan="2" className="p-3 text-right border-r border-slate-300 uppercase">SUMAS DEL MES</td>
+                  <td className="p-3 text-right text-emerald-800 border-r border-slate-300">${monthTotals.totalIngresos.toLocaleString('es-MX')}.00</td>
+                  <td className="p-3 text-right text-rose-800 border-r border-slate-300">${(monthTotals.totalEgresos + monthTotals.presbiterio10).toLocaleString('es-MX')}.00</td>
+                  <td className="p-3 border-r border-slate-300"></td>
+                  <td className="no-print"></td>
+                </tr>
+
+                <tr className="bg-white font-bold border-t border-slate-300">
+                  <td colSpan="2" className="p-3 text-right border-r border-slate-300 uppercase">SALDO DEL MES ANTERIOR</td>
+                  <td className="p-3 text-right border-r border-slate-300">${monthTotals.initialSaldo.toLocaleString('es-MX')}.00</td>
+                  <td colSpan="3" className="bg-slate-50"></td>
+                  <td className="no-print"></td>
+                </tr>
+
+                <tr className="bg-white font-bold border-t border-slate-300">
+                  <td colSpan="2" className="p-3 text-right border-r border-slate-300 uppercase">SALDO PARA SIGUIENTE MES</td>
+                  <td className="p-3 border-r border-slate-300"></td>
+                  <td className="p-3 text-right border-r border-slate-300 bg-slate-100 font-black">${monthTotals.saldoSiguienteMes.toLocaleString('es-MX')}.00</td>
+                  <td colSpan="2" className="bg-slate-50"></td>
+                  <td className="no-print"></td>
+                </tr>
+
                 <tr className="bg-slate-200 font-black border-t-2 border-slate-900">
-                  <td colSpan="2" className="p-3.5 text-right border-r border-slate-400">SUMAS IGUALES</td>
+                  <td colSpan="2" className="p-3.5 text-right border-r border-slate-400 uppercase">SUMAS IGUALES</td>
                   <td className="p-3.5 text-right border-r border-slate-400">${monthTotals.sumasIguales.toLocaleString('es-MX')}.00</td>
                   <td className="p-3.5 text-right border-r border-slate-400">${monthTotals.sumasIguales.toLocaleString('es-MX')}.00</td>
                   <td colSpan="2" className="bg-slate-100"></td>
@@ -627,28 +697,28 @@ export default function App() {
           </div>
         )}
 
-        {/* VISTA: SEGURIDAD (CON BOTÓN DE DESCARGA DE CONCEPTOS EXCLUSIVO ADMIN) */}
+        {/* VISTA: SEGURIDAD (CON MATRIZ EXCEL CONCENTRADA Y RESUMIDA AUTOMÁTICAMENTE) */}
         {activeTab === 'seguridad' && role === 'Admin' && (
           <div className="space-y-6 max-w-4xl mx-auto">
             <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-6">
               <div>
-                <h3 className="font-bold text-purple-400 text-base">Configuración de Seguridad, Claves y Plantillas ({fiscalYear})</h3>
-                <p className="text-xs text-slate-400">Gestión de PINs, saldos iniciales anuales y descarga de la plantilla oficial de conceptos contables.</p>
+                <h3 className="font-bold text-purple-400 text-base">Configuración de Seguridad, Claves y Concentrado Anual ({fiscalYear})</h3>
+                <p className="text-xs text-slate-400">Gestión de PINs, saldos iniciales y descarga del concentrado de ingresos y gastos por mes para Excel.</p>
               </div>
 
               {secMsg && <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-medium text-center">{secMsg}</div>}
 
-              {/* BOTÓN DE DESCARGA DE PLANTILLA DE CONCEPTOS */}
+              {/* BOTÓN DE DESCARGA DE MATRIZ CONCENTRADA EXCEL */}
               <div className="p-4 bg-purple-950/30 border border-purple-500/30 rounded-2xl flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-bold text-purple-300 uppercase">📥 Plantilla Oficial de Conceptos Contables</h4>
-                  <p className="text-[11px] text-slate-400">Descarga en formato Excel/CSV la lista oficial de Gastos de Operación y Ministerios.</p>
+                  <h4 className="text-xs font-bold text-purple-300 uppercase">📊 Matriz Concentrada Anual (Excel)</h4>
+                  <p className="text-[11px] text-slate-400">Descarga el concentrado con ingresos mensuales de diezmos/ofrendas y gastos agrupados por mes.</p>
                 </div>
                 <button
-                  onClick={handleDownloadConceptsExcel}
+                  onClick={handleDownloadAdvancedExcel}
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition shadow"
                 >
-                  Descargar Conceptos
+                  Descargar Concentrado Excel
                 </button>
               </div>
 
@@ -744,16 +814,17 @@ export default function App() {
         </div>
       )}
 
-      {/* ESTILOS CSS EXCLUSIVOS PARA IMPRESIÓN LIMPIA Y FIRMAS */}
+      {/* ESTILOS CSS EXCLUSIVOS PARA IMPRESIÓN LIMPIA, PAGINACIÓN NATURAL Y FIRMAS */}
       <style>{`
         @media print {
           body { background: #ffffff !important; color: #000000 !important; }
           .no-print { display: none !important; }
           header, footer, nav { display: none !important; }
           .printable-balanza { background: #ffffff !important; color: #000000 !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
-          table { border-color: #000000 !important; background: #ffffff !important; width: 100% !important; }
+          table { border-color: #000000 !important; background: #ffffff !important; width: 100% !important; page-break-inside: auto; }
+          tr { page-break-inside: avoid; page-break-after: auto; }
           th, td { border-color: #333333 !important; color: #000000 !important; }
-          .signature-section { display: grid !important; margin-top: 80px !important; page-break-inside: avoid; }
+          .signature-section { display: grid !important; margin-top: 80px !important; page-break-inside: avoid; page-break-before: auto; }
         }
       `}</style>
     </div>
